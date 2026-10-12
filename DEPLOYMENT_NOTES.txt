@@ -1,0 +1,37 @@
+MEDILINK FRONTEND UPDATE
+========================
+
+This source package is based on the active frontend repository in your ZIP:
+D:\MEDILINK\medilink\frontend
+
+Changes included:
+- Admin Recent Orders now reads deliveryPartner as the string returned by the backend.
+- The date display and Recent Orders ordering use real backend date fields when present:
+  deliveredAt, dispatchedAt, packedAt, estimatedDelivery (and compatible future fields).
+- The weekly chart uses the same available timestamp helper.
+- API base URL is configurable with VITE_API_BASE_URL. Local development still defaults
+  to http://localhost:8080.
+- Added .env.example and excluded .env files from Git.
+
+Important:
+- The backend Order response in the supplied project does not currently include an order
+  creation timestamp. The Date column therefore displays the best available lifecycle /
+  estimated-delivery date. It is not guaranteed to be the original order-placement time.
+- This archive intentionally excludes .git and node_modules. Extract/overlay the files into
+  your existing frontend Git repository folder so its .git folder stays in place.
+
+Local test:
+  npm install
+  npm run dev
+  npm run build
+
+Deployment:
+- Set VITE_API_BASE_URL to the public backend base URL only, e.g. https://your-backend.onrender.com
+  (do not add /api or a trailing slash, because the code appends /api/...).
+- Vite production output is in dist/.
+
+Validation:
+- All 11 JavaScript/JSX source files parsed successfully.
+- A full Vite build could not be completed in this environment because the provided node_modules
+  archive is missing the platform-specific native Rolldown binding. Run npm install in your
+  Windows project folder before testing/building.

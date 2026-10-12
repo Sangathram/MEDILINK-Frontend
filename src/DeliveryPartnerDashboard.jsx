@@ -3,9 +3,23 @@ import { useEffect, useRef, useState } from "react";
 const API = "http://localhost:8080";
 
 function DeliveryPartnerDashboard({ user, partnerId = 1 }) {
+  console.log("DELIVERY PARTNER ID:", partnerId);
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [availableOrders, setAvailableOrders] = useState([]);
+
+  const [availablePage, setAvailablePage] = useState(1);
+const availableOrdersPerPage = 2;
+
+const [acceptingOrderId, setAcceptingOrderId] = useState(null);
+
+
   const [updatingOrderId, setUpdatingOrderId] = useState(null);
+  const [selectedStatus, setSelectedStatus] = useState("PROCESSING");
+
+  const [selectedOrder, setSelectedOrder] = useState(null);
+  const [currentPage, setCurrentPage] = useState(1);
+  const ordersPerPage = 2;
 
   const [trackingOrderId, setTrackingOrderId] = useState(null);
   const [gpsActive, setGpsActive] = useState(false);
@@ -69,13 +83,45 @@ function DeliveryPartnerDashboard({ user, partnerId = 1 }) {
     } catch (error) {
       console.error(error);
       alert("Cannot connect to MEDILINK backend.");
-    } finally {
-      setLoading(false);
-    }
-  };
+      } finally {
+  setLoading(false);
+}
+};
+
+   const loadAvailableOrders = async () => {
+  try {
+    const response = await fetch(`${API}/api/orders/available`, {
+      method: "GET",
+      headers: {
+        Authorization: "Bearer " + token,
+      },
+    });
+
+    const data = await readResponse(response);
+
+  if (response.ok) {
+  setAvailableOrders(Array.isArray(data) ? data : []);
+  setAvailablePage(1);
+}
+
+    else {
+  console.error("Failed to load available orders:", data);
+
+  alert(
+    typeof data === "string"
+      ? data
+      : data?.message || `Failed to load orders (${response.status})`
+  );
+}
+
+  } catch (error) {
+    console.error("Cannot load available orders:", error);
+  }
+};
 
   useEffect(() => {
     loadAssignedOrders();
+      loadAvailableOrders();
 
     return () => {
       if (watchIdRef.current !== null) {
@@ -88,7 +134,48 @@ function DeliveryPartnerDashboard({ user, partnerId = 1 }) {
   // GPS
   // =========================================================
 
+  const acceptOrder = async (order) => {
+  setAcceptingOrderId(order.id);
+
+  try {
+    const response = await fetch(
+      `${API}/api/orders/${order.id}/status?status=PROCESSING`,
+      {
+        method: "PUT",
+        headers: {
+          Authorization: "Bearer " + token,
+        },
+      }
+    );
+
+    const data = await readResponse(response);
+
+    if (!response.ok) {
+      alert(
+        typeof data === "string"
+          ? data
+          : data?.message || "Could not accept order."
+      );
+      return;
+    }
+
+    alert(`Order #${order.id} accepted successfully.`);
+
+    setSelectedStatus("PROCESSING");
+    setCurrentPage(1);
+
+    await loadAssignedOrders();
+    await loadAvailableOrders();
+  } catch (error) {
+    console.error(error);
+    alert("Cannot connect to MEDILINK backend.");
+  } finally {
+    setAcceptingOrderId(null);
+  }
+};
   const stopLiveLocation = () => {
+
+
     if (
       watchIdRef.current !== null &&
       navigator.geolocation
@@ -243,7 +330,7 @@ function DeliveryPartnerDashboard({ user, partnerId = 1 }) {
     }
 
     if (order?.status === "DELIVERED") return "Delivered";
-    if (order?.status === "DISPATCHED") return "Out for Delivery";
+   if (order?.status === "DISPATCHED") return "Dispatched";
     if (order?.status === "PROCESSING") return "Processing";
 
     return "Order Placed";
@@ -412,20 +499,101 @@ function DeliveryPartnerDashboard({ user, partnerId = 1 }) {
     );
   };
 
-  const activeOrders = orders.filter(
-    (order) => order.status !== "DELIVERED"
-  ).length;
+const activeOrders = orders.filter(
+  (order) => order.status !== "DELIVERED"
+).length;
 
-  const deliveredOrders = orders.filter(
-    (order) => order.status === "DELIVERED"
-  ).length;
+const deliveredOrders = orders.filter(
+  (order) => order.status === "DELIVERED"
+).length;
+
+
+  const getOrderCategory = (order) => {
+  if (
+    order.status === "DELIVERED" ||
+    order.deliveryStatus === "DELIVERED"
+  ) {
+    return "DELIVERED";
+  }
+
+  if (
+    order.status === "DISPATCHED" ||
+    order.deliveryStatus === "OUT_FOR_DELIVERY"
+  ) {
+    return "OUT_FOR_DELIVERY";
+  }
+
+  if (
+    order.status === "PROCESSING" ||
+    order.deliveryStatus === "PROCESSING"
+  ) {
+    return "PROCESSING";
+  }
+
+  return "DISPATCHED";
+};
+
+const statusCounts = {
+  PROCESSING: orders.filter(
+    (order) => getOrderCategory(order) === "PROCESSING"
+  ).length,
+  DISPATCHED: orders.filter(
+    (order) => getOrderCategory(order) === "DISPATCHED"
+  ).length,
+  OUT_FOR_DELIVERY: orders.filter(
+    (order) => getOrderCategory(order) === "OUT_FOR_DELIVERY"
+  ).length,
+  DELIVERED: orders.filter(
+    (order) => getOrderCategory(order) === "DELIVERED"
+  ).length,
+};
+
+const filteredOrders = orders.filter(
+  (order) => getOrderCategory(order) === selectedStatus
+);
 
   const gpsOrder = orders.find(
     (order) => order.id === trackingOrderId
   );
 
+  const availableTotalPages = Math.ceil(
+  availableOrders.length / availableOrdersPerPage
+);
+
+const paginatedAvailableOrders = availableOrders.slice(
+  (availablePage - 1) * availableOrdersPerPage,
+  availablePage * availableOrdersPerPage
+);
+
   return (
-    <section style={{ marginTop: "24px" }}>
+
+
+<section
+  style={{
+    width: "100%",
+maxWidth: "1400px",
+margin: "24px auto 0",
+    marginTop: "24px",
+    padding: "24px",
+    background: "#f4f7fc",
+    minHeight: "100vh",
+    borderRadius: "18px",
+    color: "#0f172a",
+    boxSizing: "border-box",
+  }}
+>
+
+  <div
+  style={{
+    display: "grid",
+    gridTemplateColumns: "minmax(260px, 0.32fr) minmax(0, 0.68fr)",
+    gap: "20px",
+    alignItems: "start",
+  }}
+>
+
+</div>
+
       {/* HEADER */}
       <div
         style={{
@@ -514,18 +682,184 @@ function DeliveryPartnerDashboard({ user, partnerId = 1 }) {
           />
         </div>
       </div>
+      {/* CLICKABLE ORDER STATUS FILTERS */}
+      <div
+        style={{
+          display: "grid",
+         gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
+          gap: "14px",
+          marginBottom: "20px",
+        }}
+      >
+        {[
+          { key: "PROCESSING", label: "Processing", color: "#d97706", bg: "#fffbeb", icon: "⚙️" },
+          { key: "DISPATCHED", label: "Dispatched", color: "#2563eb", bg: "#eff6ff", icon: "📦" },
+          { key: "OUT_FOR_DELIVERY", label: "Out for Delivery", color: "#0f766e", bg: "#f0fdfa", icon: "🚚" },
+          { key: "DELIVERED", label: "Delivered", color: "#15803d", bg: "#f0fdf4", icon: "✅" },
+        ].map((item) => (
+          <button
+            key={item.key}
+            type="button"
+            onClick={() => setSelectedStatus(item.key)}
+            style={{
+             padding: "18px",
+minHeight: "120px",
+boxSizing: "border-box",
+boxShadow: selectedStatus === item.key
+  ? "0 6px 16px rgba(37, 99, 235, 0.15)"
+  : "0 2px 8px rgba(15, 23, 42, 0.05)",
+transition: "all 0.2s ease",
+              textAlign: "left",
+              borderRadius: "18px",
+              border: selectedStatus === item.key
+                ? `2px solid ${item.color}`
+                : "1px solid #e2e8f0",
+              background:
+  selectedStatus === item.key ? "#ffffff" : item.bg,
+              cursor: "pointer",
+            }}
+          >
+            <div style={{ fontSize: "22px" }}>{item.icon}</div>
+            <div style={{ marginTop: "8px", fontWeight: 700, color: item.color }}>
+              {item.label}
+            </div>
+            <div style={{ marginTop: "4px", fontSize: "24px", fontWeight: 800 }}>
+              {statusCounts[item.key]}
+            </div>
+            <div style={{ fontSize: "12px", color: "#64748b" }}>
+              Click to view orders
+            </div>
+          </button>
+        ))}
+      </div>
 
+
+     const availableTotalPages = Math.ceil(
+  availableOrders.length / availableOrdersPerPage
+);
+
+const paginatedAvailableOrders = availableOrders.slice(
+  (availablePage - 1) * availableOrdersPerPage,
+  availablePage * availableOrdersPerPage
+);
+
+      {/* AVAILABLE ORDERS */}
+<div
+  style={{
+    background: "#ffffff",
+    border: "1px solid #bfdbfe",
+    borderRadius: "18px",
+    padding: "20px",
+    marginBottom: "20px",
+  }}
+>
+  <h3>📦 Available Orders</h3>
+
+  <button
+    type="button"
+    onClick={loadAvailableOrders}
+    style={{
+      padding: "10px 16px",
+      background: "#0f766e",
+      color: "#ffffff",
+      border: "none",
+      borderRadius: "10px",
+      cursor: "pointer",
+    }}
+  >
+    🔄 Refresh Available Orders
+  </button>
+
+  {availableOrders.length === 0 ? (
+    <p>No available orders right now.</p>
+  ) : (
+    paginatedAvailableOrders.map((order) => (
+      <div
+        key={order.id}
+        style={{
+          padding: "16px",
+          marginTop: "12px",
+          border: "1px solid #e2e8f0",
+          borderRadius: "12px",
+        }}
+      >
+        <h4>Order #{order.id}</h4>
+        <p>Tracking ID: {order.trackingId || "Not available"}</p>
+        <p>Quantity: {order.quantity ?? "-"}</p>
+        <p>
+          Total: ₹
+          {Number(order.totalPrice || 0).toLocaleString("en-IN")}
+        </p>
+
+        <button
+          type="button"
+          onClick={() => acceptOrder(order)}
+          disabled={acceptingOrderId !== null}
+          style={{
+            padding: "10px 16px",
+            background: "#16a34a",
+            color: "#ffffff",
+            border: "none",
+            borderRadius: "8px",
+            cursor: "pointer",
+          }}
+        >
+          {acceptingOrderId === order.id
+            ? "Accepting..."
+            : "Accept Order"}
+        </button>
+      </div>
+    ))
+  )}
+{availableTotalPages > 1 && (
+  <div
+    style={{
+      display: "flex",
+      justifyContent: "center",
+      alignItems: "center",
+      gap: "12px",
+      marginTop: "16px",
+    }}
+  >
+    <button
+      type="button"
+      onClick={() =>
+        setAvailablePage((page) => Math.max(1, page - 1))
+      }
+      disabled={availablePage === 1}
+    >
+      Previous
+    </button>
+
+    <span>
+      Page {availablePage} of {availableTotalPages}
+    </span>
+
+    <button
+      type="button"
+      onClick={() =>
+        setAvailablePage((page) =>
+          Math.min(availableTotalPages, page + 1)
+        )
+      }
+      disabled={availablePage >= availableTotalPages}
+    >
+      Next
+    </button>
+  </div>
+)}
+
+</div>
       {/* LIVE GPS PANEL */}
       {gpsOrder && (
         <div
           style={{
-            background: "#ffffff",
-            borderRadius: "18px",
-            padding: "20px",
-            marginBottom: "18px",
-            border: "1px solid #bfdbfe",
-            boxShadow: "0 5px 18px rgba(15, 23, 42, 0.07)",
-          }}
+  background: "#ffffff",
+  border: "1px solid #e2e8f0",
+  borderRadius: "18px",
+  padding: "18px",
+  boxShadow: "0 5px 18px rgba(15, 23, 42, 0.07)",
+}}
         >
           <div
             style={{
@@ -661,16 +995,21 @@ function DeliveryPartnerDashboard({ user, partnerId = 1 }) {
             Orders assigned to you will appear here.
           </p>
         </div>
-      ) : (
-        <div
-          style={{
-            display: "grid",
+           ) : (
+        <>
+          <div
+            style={{
+              display: "grid",
+
+
             gridTemplateColumns:
               "repeat(auto-fit, minmax(320px, 1fr))",
             gap: "18px",
           }}
         >
-          {orders.map((order) => {
+         {filteredOrders
+  .slice((currentPage - 1) * ordersPerPage, currentPage * ordersPerPage)
+  .map((order) => {
             const statusStyle = getStatusStyle(order);
             const isGpsOrder = trackingOrderId === order.id;
             const canTrack =
@@ -679,13 +1018,14 @@ function DeliveryPartnerDashboard({ user, partnerId = 1 }) {
             return (
               <div
                 key={order.id}
+                onClick={() => setSelectedOrder(order)}
                 style={{
                   background: "#ffffff",
                   border: "1px solid #e2e8f0",
-                  borderRadius: "18px",
-                  padding: "18px",
-                  boxShadow:
-                    "0 5px 18px rgba(15, 23, 42, 0.07)",
+                  borderRadius: "14px",
+                  padding: "20px",
+                 boxShadow: "0 2px 10px rgba(15, 23, 42, 0.04)",
+boxSizing: "border-box",
                 }}
               >
                 {/* ORDER HEADER */}
@@ -863,11 +1203,58 @@ function DeliveryPartnerDashboard({ user, partnerId = 1 }) {
             );
           })}
         </div>
+
+        {/* PAGINATION */}
+        {filteredOrders.length > ordersPerPage && (
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "center",
+              alignItems: "center",
+              gap: "12px",
+              marginTop: "20px",
+              marginBottom: "20px",
+            }}
+          >
+            <button
+              type="button"
+              onClick={() =>
+                setCurrentPage((page) => Math.max(1, page - 1))
+              }
+              disabled={currentPage === 1}
+            >
+              Previous
+            </button>
+
+            <span>
+              Page {currentPage} of{" "}
+              {Math.ceil(filteredOrders.length / ordersPerPage)}
+            </span>
+
+            <button
+              type="button"
+              onClick={() =>
+                setCurrentPage((page) =>
+                  Math.min(
+                    Math.ceil(filteredOrders.length / ordersPerPage),
+                    page + 1
+                  )
+                )
+              }
+              disabled={
+                currentPage >=
+                Math.ceil(filteredOrders.length / ordersPerPage)
+              }
+            >
+              Next
+            </button>
+          </div>
+               )}
+        </>
       )}
     </section>
   );
 }
-
 // =========================================================
 // SMALL COMPONENTS
 // =========================================================

@@ -22,3 +22,11 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Environment variables (do not commit secrets)
+.env
+.env.*
+!.env.example
+
+# Local backup copy created during troubleshooting (do not deploy)
+src/App.jsx copy.jsx

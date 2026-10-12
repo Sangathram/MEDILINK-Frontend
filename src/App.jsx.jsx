@@ -7,7 +7,7 @@ import "./App.css";
 import NotificationBell from "./NotificationBell";
 import DeliveryPartnerDashboard from "./DeliveryPartnerDashboard";
 
-const API = "http://localhost:8080";
+const API = (import.meta.env.VITE_API_BASE_URL || "http://localhost:8080").replace(/\/+$/, "");
 
 // =========================================================
 // DELIVERY CHARGE SETTINGS
@@ -181,6 +181,7 @@ const CartSection = ({
   cartGrandTotal,
   placeCartOrders,
 }) => {
+    const [showOrderReview, setShowOrderReview] = useState(false);
     return (
       <section className="section cart-section">
         <div className="section-title-row">
@@ -366,12 +367,82 @@ const CartSection = ({
                 </strong>
               </div>
 
-              <button
-                className="success-button checkout-button"
-                onClick={placeCartOrders}
-              type="button">
-                🛒 Place All Orders
-              </button>
+            <button
+  className="success-button checkout-button"
+  onClick={() => setShowOrderReview(true)}
+  type="button"
+>
+  🛒 Review & Place Order
+</button>
+     {showOrderReview && (
+  <div
+    style={{
+      marginTop: "20px",
+      padding: "20px",
+      borderRadius: "14px",
+      background: "#f8fafc",
+      border: "1px solid #dbeafe",
+    }}
+  >
+    <h3 style={{ marginTop: 0 }}>
+      🧾 Review Your Order
+    </h3>
+
+    <p>
+      Total Items: <strong>{cartItemCount}</strong>
+    </p>
+
+    <p>
+      Items Subtotal:{" "}
+      <strong>
+        ₹{cartTotal.toLocaleString("en-IN")}
+      </strong>
+    </p>
+
+    <p>
+      Delivery Charge:{" "}
+      <strong>
+        {deliveryCharge === 0
+          ? "FREE"
+          : "₹" + deliveryCharge.toLocaleString("en-IN")}
+      </strong>
+    </p>
+
+    <p>
+      Grand Total:{" "}
+      <strong>
+        ₹{cartGrandTotal.toLocaleString("en-IN")}
+      </strong>
+    </p>
+
+    <div
+      style={{
+        display: "flex",
+        gap: "12px",
+        marginTop: "18px",
+      }}
+    >
+      <button
+        type="button"
+        className="danger-button"
+        onClick={() => setShowOrderReview(false)}
+      >
+        ❌ Cancel
+      </button>
+
+      <button
+        type="button"
+        className="success-button"
+        onClick={() => {
+          setShowOrderReview(false);
+          placeCartOrders(true);
+        }}
+      >
+        ✅ Confirm Order
+      </button>
+    </div>
+  </div>
+)}
             </div>
           </>
         )}
@@ -398,29 +469,74 @@ function App() {
   const [confirmResetPassword, setConfirmResetPassword] = useState("");
   const [showResetPassword, setShowResetPassword] = useState(false);
 
+  // Restore a session only when both the saved user and auth token exist.
   const [user, setUser] = useState(() => {
     const savedUser = localStorage.getItem("user");
+    const savedToken = localStorage.getItem("token");
 
-    if (savedUser) {
-      try {
-        return JSON.parse(savedUser);
-      } catch {
-        return null;
-      }
+    if (!savedUser || !savedToken) {
+      localStorage.removeItem("user");
+      localStorage.removeItem("token");
+      return null;
     }
 
-    return null;
+    try {
+      const parsedUser = JSON.parse(savedUser);
+      return parsedUser && parsedUser.role ? parsedUser : null;
+    } catch {
+      localStorage.removeItem("user");
+      localStorage.removeItem("token");
+      return null;
+    }
   });
 
   const [medicines, setMedicines] = useState([]);
   const [healthcareProducts, setHealthcareProducts] = useState([]);
   const [orders, setOrders] = useState([]);
   const [users, setUsers] = useState([]);
+const [deliveryPartners, setDeliveryPartners] = useState([]);
+const [loadingDeliveryPartners, setLoadingDeliveryPartners] = useState(false);
+
   const [prescriptions, setPrescriptions] = useState([]);
   const [loadingPrescriptions, setLoadingPrescriptions] = useState(false);
   const [uploadingPrescription, setUploadingPrescription] = useState(false);
 
   const [search, setSearch] = useState("");
+  const [activeDashboardSection, setActiveDashboardSection] = useState("overview");
+
+const [initialOrderFilter, setInitialOrderFilter] = useState("ALL");
+
+  const dashboardSections = {
+
+
+PATIENT: [
+  { id: "overview", label: "Overview", icon: "🏠" },
+  { id: "cart", label: "My Cart", icon: "🛒" },
+  { id: "orders", label: "Orders", icon: "📦" },
+  { id: "products", label: "Browse Medicines", icon: "💊" },
+  { id: "prescriptions", label: "Prescriptions", icon: "📋" },
+  { id: "profile", label: "Profile", icon: "👤" },
+  { id: "ai", label: "AI Assistant", icon: "🤖" },
+],
+
+
+
+  ADMIN: [
+    { id: "overview", label: "Overview", icon: "🏠" },
+    { id: "users", label: "Patients & Users", icon: "👥" },
+    { id: "orders", label: "Orders", icon: "📦" },
+    { id: "medicines", label: "Medicines", icon: "💊" },
+    { id: "prescriptions", label: "Prescriptions", icon: "📋" },
+    { id: "deliveryPartners", label: "Delivery Partners", icon: "🚚" },
+  ],
+
+  PHARMACY: [
+    { id: "overview", label: "Overview", icon: "🏠" },
+    { id: "inventory", label: "Inventory", icon: "💊" },
+    { id: "orders", label: "Orders", icon: "📦" },
+    { id: "prescriptions", label: "Prescriptions", icon: "📋" },
+  ],
+};
 
   const [medicinePage, setMedicinePage] = useState(1);
   const medicinesPerPage = 9;
@@ -524,18 +640,34 @@ function App() {
       const data = await readResponse(response);
 
       if (response.ok) {
-        localStorage.setItem("token", data.token);
-        localStorage.setItem("user", JSON.stringify(data));
+        // Accept either { token, id, name, role, ... } or
+        // { token/accessToken, user: { id, name, role, ... } } responses.
+        const sessionUser = data?.user ?? data;
+        const sessionToken = data?.token ?? data?.accessToken ?? sessionUser?.token;
 
-        setUser(data);
+        if (!sessionToken || !sessionUser?.role) {
+          console.error("Unexpected login response:", data);
+          alert("Login response is missing the authentication token or user role. Check the backend login response.");
+          return;
+        }
+
+        const safeUser = { ...sessionUser };
+        delete safeUser.token;
+        delete safeUser.accessToken;
+
+        localStorage.setItem("token", sessionToken);
+        localStorage.setItem("user", JSON.stringify(safeUser));
+
+        setUser(safeUser);
+        setActiveDashboardSection("overview");
         setEmail("");
         setPassword("");
 
         alert(
           "Login successful!\n\nWelcome " +
-            data.name +
+            (safeUser.name || safeUser.email || "User") +
             "\nRole: " +
-            data.role
+            safeUser.role
         );
       } else {
         alert(
@@ -804,6 +936,37 @@ function App() {
     }
   };
 
+  // LOAD AVAILABLE ORDERS FOR DELIVERY PARTNERS
+  const loadAvailableOrders = async () => {
+    setLoadingOrders(true);
+
+    try {
+      const response = await fetch(`${API}/api/orders/available`, {
+        method: "GET",
+        headers: {
+          Authorization: "Bearer " + token,
+        },
+      });
+
+      const data = await readResponse(response);
+
+      if (response.ok) {
+        setOrders(Array.isArray(data) ? data : []);
+      } else {
+        alert(
+          typeof data === "string"
+            ? data
+            : data?.message || "Failed to load available orders"
+        );
+      }
+    } catch (error) {
+      console.error(error);
+      alert("Cannot load available orders.");
+    } finally {
+      setLoadingOrders(false);
+    }
+  };
+
   // =========================================================
   // LOAD USERS
   // =========================================================
@@ -837,6 +1000,39 @@ function App() {
       setLoadingUsers(false);
     }
   };
+
+const loadDeliveryPartners = async () => {
+  setLoadingDeliveryPartners(true);
+
+  try {
+    const response = await fetch(`${API}/api/delivery-partners`, {
+      method: "GET",
+      headers: {
+        Authorization: "Bearer " + token,
+      },
+    });
+
+    const data = await readResponse(response);
+
+    if (response.ok) {
+      setDeliveryPartners(Array.isArray(data) ? data : []);
+    } else {
+      console.error("Failed to load delivery partners:", data);
+      alert(
+        typeof data === "string"
+          ? data
+          : data?.message || "Failed to load delivery partners"
+      );
+    }
+  } catch (error) {
+    console.error(error);
+    alert("Cannot load delivery partners.");
+  } finally {
+    setLoadingDeliveryPartners(false);
+  }
+};
+
+
 
   // =========================================================
   // PATIENT CART
@@ -1129,28 +1325,30 @@ function App() {
   // PLACE CART ORDERS
   // =========================================================
 
-  const placeCartOrders = async () => {
+  const placeCartOrders = async (skipConfirmation = false) => {
     if (cart.length === 0) {
       alert("Your cart is empty.");
       return;
     }
 
-    const confirmOrder = window.confirm(
-      "Place " +
-        cartItemCount +
-        " item(s)?\\n\\n" +
-        "Items Subtotal: ₹" +
-        cartTotal.toLocaleString("en-IN") +
-        "\\nDelivery Charge: " +
-        (deliveryCharge === 0
-          ? "FREE"
-          : "₹" + deliveryCharge.toLocaleString("en-IN")) +
-        "\\nGrand Total: ₹" +
-        cartGrandTotal.toLocaleString("en-IN") +
-        "\\n\\nProceed with your order?"
-    );
+    if (!skipConfirmation) {
+  const confirmOrder = window.confirm(
+    "Place " +
+      cartItemCount +
+      " item(s)?\n\n" +
+      "Items Subtotal: ₹" +
+      cartTotal.toLocaleString("en-IN") +
+      "\nDelivery Charge: " +
+      (deliveryCharge === 0
+        ? "FREE"
+        : "₹" + deliveryCharge.toLocaleString("en-IN")) +
+      "\nGrand Total: ₹" +
+      cartGrandTotal.toLocaleString("en-IN") +
+      "\n\nProceed with your order?"
+  );
 
-    if (!confirmOrder) return;
+  if (!confirmOrder) return;
+}
 
     const cartSnapshot = [...cart];
 
@@ -1725,83 +1923,98 @@ function App() {
   // UPDATE ORDER STATUS
   // =========================================================
 
-  const updateOrderStatus = async (order) => {
-    let nextStatus = "";
+  // =========================================================
+// UPDATE ORDER STATUS
+// =========================================================
 
-    if (order.status === "PLACED") {
-      nextStatus = "PROCESSING";
-    } else if (order.status === "PROCESSING") {
-      nextStatus = "DISPATCHED";
-    } else if (order.status === "DISPATCHED") {
-      nextStatus = "DELIVERED";
-    } else {
-      alert("This order cannot be changed.");
-      return;
-    }
 
-    const confirmUpdate = window.confirm(
-      "Change Order #" +
-        order.id +
-        " from " +
-        order.status +
-        " to " +
-        nextStatus +
-        "?"
+const updateOrderStatus = async (order) => {
+  const currentStatus = String(
+    order.status || order.deliveryStatus || "PLACED"
+  ).toUpperCase();
+
+  let nextStatus = "";
+
+  if (
+    currentStatus === "PLACED" ||
+    currentStatus === "ORDER_PLACED"
+  ) {
+    nextStatus = "PROCESSING";
+  } else if (currentStatus === "PROCESSING") {
+    nextStatus = "DISPATCHED";
+  } else if (currentStatus === "DISPATCHED") {
+    nextStatus = "DELIVERED";
+  } else {
+    alert("This order cannot be changed.");
+    return;
+  }
+
+  const confirmUpdate = window.confirm(
+    "Change Order #" +
+      order.id +
+      " from " +
+      currentStatus +
+      " to " +
+      nextStatus +
+      "?"
+  );
+
+  if (!confirmUpdate) return;
+
+  try {
+    const response = await fetch(
+      `${API}/api/orders/${order.id}/status?status=${nextStatus}`,
+      {
+        method: "PUT",
+        headers: {
+          Authorization: "Bearer " + token,
+        },
+      }
     );
 
-    if (!confirmUpdate) return;
+    const data = await readResponse(response);
 
-    try {
-      const response = await fetch(
-        `${API}/api/orders/${order.id}/status?status=${nextStatus}`,
-        {
-          method: "PUT",
-          headers: {
-            Authorization: "Bearer " + token,
-          },
-        }
+    if (response.ok) {
+      alert(
+        "Order #" +
+          order.id +
+          " updated to " +
+          nextStatus
       );
 
-      const data = await readResponse(response);
-
-      if (response.ok) {
-        alert(
-          "Order #" +
-            order.id +
-            " updated to " +
-            nextStatus
-        );
-
-        loadAllOrders();
-      } else {
-        alert(
-          typeof data === "string"
-            ? data
-            : data?.message || "Status update failed"
-        );
-      }
-    } catch (error) {
-      console.error(error);
-      alert("Cannot update order status.");
+      await loadAllOrders();
+    } else {
+      alert(
+        typeof data === "string"
+          ? data
+          : data?.message || "Status update failed"
+      );
     }
-  };
+  } catch (error) {
+    console.error(error);
+    alert("Cannot update order status.");
+  }
+};
 
   // =========================================================
   // LOGOUT
   // =========================================================
 
   const logout = () => {
+    // Clear the session so the next user must authenticate again.
     localStorage.removeItem("token");
     localStorage.removeItem("user");
 
     setUser(null);
     setMedicines([]);
+    setHealthcareProducts([]);
     setOrders([]);
     setUsers([]);
     setPrescriptions([]);
     setCart([]);
     setTrackingOrder(null);
-
+    setActiveDashboardSection("overview");
+    setSearch("");
     setEmail("");
     setPassword("");
   };
@@ -1810,29 +2023,30 @@ function App() {
   // LOAD DATA AFTER LOGIN
   // =========================================================
 
-  useEffect(() => {
-    if (!user || !token) return;
+useEffect(() => {
+  if (!user || !token) return;
 
-    loadMedicines();
-    loadHealthcareProducts();
+  loadMedicines();
+  loadHealthcareProducts();
 
-    if (user.role === "PATIENT") {
-      loadMyOrders();
-      loadMyPrescriptions();
-    }
+  if (user.role === "PATIENT") {
+    loadMyOrders();
+    loadMyPrescriptions();
+  }
 
-    if (
-      user.role === "ADMIN" ||
-      user.role === "PHARMACY"
-    ) {
-      loadAllOrders();
-      loadAllPrescriptions();
-    }
+  if (user.role === "ADMIN" || user.role === "PHARMACY") {
+    loadAllOrders();
+    loadAllPrescriptions();
+  }
 
-    if (user.role === "ADMIN") {
-      loadUsers();
-    }
-  }, [user]);
+  if (user.role === "DELIVERY_PARTNER") {
+    loadAvailableOrders();
+  }
+
+  if (user.role === "ADMIN") {
+    loadUsers();
+  }
+}, [user, token]);
 
   // =========================================================
   // PRESCRIPTION SECTION
@@ -2155,7 +2369,7 @@ function App() {
   >
     All
   </button>
-</div>   
+</div>
 
         {loadingMedicines ? (
           <p className="center-text">
@@ -2911,7 +3125,33 @@ function App() {
   // ORDERS SECTION
   // =========================================================
 
-  const OrdersSection = ({ adminView = false }) => {
+
+const OrdersSection = ({
+  adminView = false,
+  initialFilter = "ALL",
+}) => {
+
+    const [orderStatusFilter, setOrderStatusFilter] = useState("ALL");
+
+    const [currentOrderPage, setCurrentOrderPage] = useState(1);
+    const ordersPerPage = 2;
+
+const [orderSearchTerm, setOrderSearchTerm] = useState("");
+
+
+
+useEffect(() => {
+  setCurrentOrderPage(1);
+}, [orderSearchTerm, orderStatusFilter]);
+
+
+
+useEffect(() => {
+  setOrderStatusFilter(initialFilter || "ALL");
+  setCurrentOrderPage(1);
+}, [initialFilter]);
+
+
     const getOrderDate = (order) => {
       const value =
         order?.createdAt ||
@@ -3036,6 +3276,64 @@ function App() {
       }
     };
 
+
+const filteredOrders = orders.filter((order) => {
+  const searchText = orderSearchTerm.trim().toLowerCase();
+
+  const orderId = String(order.id ?? "").toLowerCase();
+
+  const patientName = String(
+    order.patient?.name ||
+    order.user?.name ||
+    order.patientName ||
+    order.userName ||
+    order.customerName ||
+    order.customer?.name ||
+    ""
+  ).toLowerCase();
+
+  const matchesSearch =
+    !searchText ||
+    orderId.includes(searchText) ||
+    patientName.includes(searchText);
+
+  const status = String(
+    order.deliveryStatus || order.status || "ORDER_PLACED"
+  ).toUpperCase();
+
+  let matchesStatus = true;
+
+  if (orderStatusFilter === "PLACED") {
+    matchesStatus =
+      status === "ORDER_PLACED" || status === "PLACED";
+  } else if (orderStatusFilter === "PROCESSING") {
+    matchesStatus =
+      status === "PROCESSING" || status === "PACKED";
+  } else if (orderStatusFilter === "OUT_FOR_DELIVERY") {
+    matchesStatus =
+      status === "OUT_FOR_DELIVERY" || status === "DISPATCHED";
+  } else if (orderStatusFilter === "DELIVERED") {
+    matchesStatus = status === "DELIVERED";
+  }
+
+  return matchesSearch && matchesStatus;
+});
+
+
+
+const totalOrderPages = Math.max(
+  1,
+  Math.ceil(filteredOrders.length / ordersPerPage)
+);
+
+const paginatedOrders = filteredOrders.slice(
+  (currentOrderPage - 1) * ordersPerPage,
+  currentOrderPage * ordersPerPage
+);
+
+
+
+
     return (
       <section className="section">
         <div className="section-title-row">
@@ -3069,6 +3367,92 @@ function App() {
             🔄 Refresh Orders
           </button>
         </div>
+
+
+        <div style={{ margin: "20px 0" }}>
+          <input
+            type="text"
+            value={orderSearchTerm}
+            onChange={(event) => setOrderSearchTerm(event.target.value)}
+            placeholder="Search by Order ID or patient name..."
+            aria-label="Search orders by ID or patient name"
+            style={{
+              width: "100%",
+              maxWidth: "480px",
+              padding: "12px 16px",
+              border: "1px solid #cbd5e1",
+              borderRadius: "10px",
+              fontSize: "14px",
+              boxSizing: "border-box",
+            }}
+          />
+        </div>
+
+
+        {adminView && (
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))",
+              gap: "12px",
+              margin: "20px 0",
+            }}
+          >
+            {[
+              { label: "All Orders", value: "ALL", color: "#475569" },
+              { label: "Placed", value: "PLACED", color: "#2563eb" },
+              { label: "Processing", value: "PROCESSING", color: "#b45309" },
+              { label: "Out for Delivery", value: "OUT_FOR_DELIVERY", color: "#0369a1" },
+              { label: "Delivered", value: "DELIVERED", color: "#15803d" },
+            ].map((filter) => {
+              const count = orders.filter((order) => {
+                const status = order.deliveryStatus || order.status || "ORDER_PLACED";
+
+                if (filter.value === "ALL") return true;
+                if (filter.value === "PLACED") {
+                  return status === "ORDER_PLACED" || status === "PLACED";
+                }
+                if (filter.value === "PROCESSING") {
+                  return status === "PROCESSING" || status === "PACKED";
+                }
+                if (filter.value === "OUT_FOR_DELIVERY") {
+                  return status === "OUT_FOR_DELIVERY" || status === "DISPATCHED";
+                }
+                return status === "DELIVERED";
+              }).length;
+
+              const selected = orderStatusFilter === filter.value;
+
+              return (
+                <button
+                  key={filter.value}
+                  type="button"
+                  onClick={() => setOrderStatusFilter(filter.value)}
+                  style={{
+                    padding: "16px 12px",
+                    borderRadius: "12px",
+                    border: selected
+                      ? `2px solid ${filter.color}`
+                      : "1px solid #e2e8f0",
+                    background: selected ? "#f1f5f9" : "#ffffff",
+                    cursor: "pointer",
+                    textAlign: "left",
+                  }}
+                >
+                  <div style={{ color: filter.color, fontWeight: 700 }}>
+                    {filter.label}
+                  </div>
+                  <div style={{ fontSize: "24px", fontWeight: 800, marginTop: "6px" }}>
+                    {count}
+                  </div>
+                  <div style={{ fontSize: "12px", color: "#64748b" }}>
+                    orders
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        )}
 
         {loadingOrders ? (
           <p className="center-text">
@@ -3108,7 +3492,8 @@ function App() {
               gap: "18px",
             }}
           >
-            {orders.map((order) => {
+
+           {paginatedOrders.map((order) => {
               const isHealthcare =
                 order.productType === "HEALTHCARE" ||
                 order.healthcareProductId != null;
@@ -3123,17 +3508,28 @@ function App() {
                 getOrderStatusClass(order);
 
               return (
-                <div
-                  key={order.id}
-                  style={{
-                    background: "#ffffff",
-                    border: "1px solid #e2e8f0",
-                    borderRadius: "18px",
-                    padding: "18px",
-                    boxShadow:
-                      "0 5px 18px rgba(15, 23, 42, 0.07)",
-                  }}
-                >
+
+<div
+  key={order.id}
+  onClick={() => openTracking(order)}
+  role="button"
+  tabIndex={0}
+  onKeyDown={(event) => {
+    if (event.key === "Enter") openTracking(order);
+  }}
+  style={{
+    background: "#ffffff",
+    border: "1px solid #dbe5f1",
+    borderRadius: "16px",
+    padding: "20px",
+    boxShadow: "0 4px 14px rgba(15, 40, 75, 0.06)",
+    transition: "box-shadow 0.2s ease, border-color 0.2s ease",
+    minWidth: 0,
+    overflow: "hidden",
+  }}
+>
+
+
                   <div
                     style={{
                       display: "flex",
@@ -3438,21 +3834,69 @@ function App() {
                           }
                           type="button"
                         >
-                          {order.status === "PLACED" &&
-                            "⚙️ Process Order"}
-                          {order.status === "PROCESSING" &&
-                            "🚚 Dispatch Order"}
-                          {order.status === "DISPATCHED" &&
-                            "🎉 Mark Delivered"}
+                          {String(order.status || "").toUpperCase() === "PLACED" &&
+    "⚙️ Process Order"}
+
+  {String(order.status || "").toUpperCase() === "PROCESSING" &&
+    "🚚 Dispatch Order"}
+
+  {String(order.status || "").toUpperCase() === "DISPATCHED" &&
+    "🎉 Mark Delivered"}
                         </button>
                       ))}
                   </div>
                 </div>
+
+
+
               );
             })}
           </div>
         )}
+
+        {filteredOrders.length > 0 && (
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "center",
+              alignItems: "center",
+              gap: "16px",
+              marginTop: "24px",
+              padding: "12px",
+            }}
+          >
+            <button
+              type="button"
+              className="secondary-button"
+              disabled={currentOrderPage === 1}
+              onClick={() =>
+                setCurrentOrderPage((page) => page - 1)
+              }
+            >
+              ← Previous
+            </button>
+
+            <span>
+              Page {currentOrderPage} of {totalOrderPages}
+            </span>
+
+            <button
+              type="button"
+              className="primary-button"
+              disabled={currentOrderPage >= totalOrderPages}
+              onClick={() =>
+                setCurrentOrderPage((page) => page + 1)
+              }
+            >
+              Next →
+            </button>
+          </div>
+        )}
       </section>
+
+
+
+
     );
   };
 
@@ -3488,9 +3932,44 @@ function App() {
               <thead>
                 <tr>
                   <th>ID</th>
-                  <th>Name</th>
-                  <th>Email</th>
-                  <th>Role</th>
+
+<th
+  style={{
+    padding: "16px 18px",
+    textAlign: "left",
+    background: "#eff6ff",
+    color: "#1e3a8a",
+    fontSize: "13px",
+    fontWeight: 750,
+  }}
+>
+  Name
+</th>
+<th
+  style={{
+    padding: "16px 18px",
+    textAlign: "left",
+    background: "#eff6ff",
+    color: "#1e3a8a",
+    fontSize: "13px",
+    fontWeight: 750,
+  }}
+>
+  Email
+</th>
+<th
+  style={{
+    padding: "16px 18px",
+    textAlign: "left",
+    background: "#eff6ff",
+    color: "#1e3a8a",
+    fontSize: "13px",
+    fontWeight: 750,
+  }}
+>
+  Phone
+</th>
+
                 </tr>
               </thead>
 
@@ -3576,21 +4055,21 @@ const PharmacyStats = () => {
           </div>
         </div>
 
-        <div className="stat-card stat-orders">
-          <div className="stat-icon">📦</div>
-          <div>
-            <p>Total Orders</p>
-            <h3>{totalOrders}</h3>
-          </div>
-        </div>
-
-        <div className="stat-card stat-stock">
-          <div className="stat-icon">📊</div>
-          <div>
-            <p>Total Stock</p>
-            <h3>{totalStock}</h3>
-          </div>
-        </div>
+        <div
+  className="stat-card stat-orders"
+  onClick={() => {
+    setActiveDashboardSection("orders");
+  }}
+  role="button"
+  tabIndex={0}
+  style={{ cursor: "pointer" }}
+>
+  <div className="stat-icon">📦</div>
+  <div>
+    <p>Total Orders</p>
+    <h3>{totalOrders}</h3>
+  </div>
+</div>
 
         <div className="stat-card stat-low-stock">
           <div className="stat-icon">⚠️</div>
@@ -3622,126 +4101,398 @@ const PharmacyStats = () => {
     </section>
   );
 };
-  const AdminStats = () => {
+ const AdminStats = ({ setActiveDashboardSection }) => {
     const totalUsers = users.length;
+    const totalPatients = users.filter((item) =>
+      String(item.role || "").toUpperCase() === "PATIENT"
+    ).length;
+    const deliveryPartners = users.filter((item) =>
+      String(item.role || "").toUpperCase() === "DELIVERY_PARTNER"
+    ).length;
+    const activePartners = deliveryPartners;
     const totalMedicines = medicines.length;
     const totalOrders = orders.length;
+    const totalStock = medicines.reduce((sum, item) => {
+      const value = Number(item.stock);
+      return sum + (Number.isFinite(value) && value > 0 ? value : 0);
+    }, 0);
+    const lowStockMedicines = medicines.filter((item) => {
+      const stock = Number(item.stock);
+      return Number.isFinite(stock) && stock >= 0 && stock <= 10;
+    });
+    const totalOrderValue = orders.reduce((sum, order) => {
+      const value = Number(order.totalPrice ?? order.totalAmount ?? 0);
+      return sum + (Number.isFinite(value) && value > 0 ? value : 0);
+    }, 0);
+    const orderStatus = (order) => String(order?.deliveryStatus || order?.status || "PLACED").toUpperCase();
+    const isDelivered = (order) => orderStatus(order) === "DELIVERED";
+    const isProcessing = (order) => ["PROCESSING", "PACKED"].includes(orderStatus(order));
+    const isOutForDelivery = (order) => ["DISPATCHED", "OUT_FOR_DELIVERY", "IN_TRANSIT"].includes(orderStatus(order));
+    const isPending = (order) => !isDelivered(order) && !isProcessing(order) && !isOutForDelivery(order);
+    const pendingOrders = orders.filter(isPending).length;
+    const processingOrders = orders.filter(isProcessing).length;
+    const deliveryOrders = orders.filter(isOutForDelivery).length;
+    const deliveredOrders = orders.filter(isDelivered).length;
+    // Use fields that actually exist on the backend Order response.
+    // createdAt/orderDate are kept as preferred fields in case the API adds them later.
+    const getOrderTimestamp = (order) => {
+      const values = [
+        order?.createdAt,
+        order?.orderDate,
+        order?.placedAt,
+        order?.updatedAt,
+        order?.deliveredAt,
+        order?.dispatchedAt,
+        order?.packedAt,
+        order?.estimatedDelivery,
+      ];
 
-    const totalStock = medicines.reduce(
-      (sum, medicine) => {
-        const stock = Number(medicine.stock);
-        return (
-          sum +
-          (Number.isFinite(stock) && stock > 0
-            ? stock
-            : 0)
-        );
-      },
-      0
-    );
-
-    const totalOrderValue = orders.reduce(
-      (sum, order) => {
-        const value = Number(order.totalPrice);
-        return (
-          sum +
-          (Number.isFinite(value) && value > 0
-            ? value
-            : 0)
-        );
-      },
-      0
-    );
-
-    const lowStockMedicines = medicines.filter(
-      (medicine) => {
-        const stock = Number(medicine.stock);
-        return (
-          Number.isFinite(stock) &&
-          stock > 0 &&
-          stock <= 10
-        );
+      for (const value of values) {
+        if (!value) continue;
+        const timestamp = new Date(value).getTime();
+        if (Number.isFinite(timestamp)) return timestamp;
       }
-    ).length;
+
+      return null;
+    };
+
+    const recentOrders = [...orders]
+      .sort((a, b) => (getOrderTimestamp(b) ?? 0) - (getOrderTimestamp(a) ?? 0))
+      .slice(0, 5);
+
+    const getPatientName = (order) =>
+      order?.patient?.name ||
+      order?.user?.name ||
+      order?.patientName ||
+      order?.userName ||
+      order?.customerName ||
+      order?.customer?.name ||
+      "Patient";
+
+    // The backend returns deliveryPartner as a string, not an object.
+    const getPartnerName = (order) =>
+      order?.deliveryPartner || "Not assigned";
+
+    const getDate = (order) => {
+      const timestamp = getOrderTimestamp(order);
+      if (timestamp === null) return "—";
+
+      return new Date(timestamp).toLocaleDateString("en-IN", {
+        day: "2-digit",
+        month: "short",
+        year: "numeric",
+      });
+    };
+    const statusLabel = (order) => {
+      const status = orderStatus(order);
+      if (status === "DELIVERED") return "Delivered";
+      if (["DISPATCHED", "OUT_FOR_DELIVERY", "IN_TRANSIT"].includes(status)) return "Out for Delivery";
+      if (["PROCESSING", "PACKED"].includes(status)) return "Processing";
+      return "Pending";
+    };
+    const orderTotal = (order) => Number(order?.totalPrice ?? order?.totalAmount ?? 0) || 0;
+    const orderItems = (order) => order?.quantity ?? order?.items?.length ?? 1;
+    const weeklyOrders = (() => {
+      const days = [];
+      for (let offset = 6; offset >= 0; offset -= 1) {
+        const date = new Date();
+        date.setHours(0, 0, 0, 0);
+        date.setDate(date.getDate() - offset);
+        const next = new Date(date);
+        next.setDate(next.getDate() + 1);
+        const count = orders.filter((order) => {
+          const time = getOrderTimestamp(order);
+          if (time === null) return false;
+          return time >= date.getTime() && time < next.getTime();
+        }).length;
+        days.push({ label: date.toLocaleDateString("en-IN", { month: "short", day: "2-digit" }), count });
+      }
+      return days;
+    })();
+    const maxDailyOrders = Math.max(1, ...weeklyOrders.map((day) => day.count));
+    const statusTotal = Math.max(1, pendingOrders + processingOrders + deliveryOrders + deliveredOrders);
+    const notifications = [
+      ...(recentOrders[0] ? [{ icon: "🛒", title: "New order activity", detail: `Order #${recentOrders[0].id ?? "—"} placed by ${getPatientName(recentOrders[0])}`, time: getDate(recentOrders[0]), tone: "green" }] : []),
+      ...(deliveryOrders > 0 ? [{ icon: "🚚", title: "Orders out for delivery", detail: `${deliveryOrders} order(s) are on the way`, time: "Current status", tone: "amber" }] : []),
+      ...(lowStockMedicines.length > 0 ? [{ icon: "⚠️", title: "Low stock alert", detail: `${lowStockMedicines.length} medicine(s) have 10 or fewer units`, time: "Inventory", tone: "red" }] : []),
+      ...(pendingOrders > 0 ? [{ icon: "📦", title: "Orders awaiting action", detail: `${pendingOrders} order(s) need processing`, time: "Orders", tone: "purple" }] : []),
+    ];
+    const activity = recentOrders.slice(0, 4);
 
     return (
-      <section className="admin-stats-section">
-        <div className="section-title-row">
+      <section className="medilink-admin-dashboard">
+        <header className="admin-dashboard-heading">
           <div>
-            <h2>📊 Admin Overview</h2>
-            <p className="stats-subtitle">
-              Quick summary of MEDILINK system activity
-            </p>
+            <p className="admin-eyebrow">MEDILINK CONTROL CENTER</p>
+            <h1>Admin Dashboard</h1>
+            <p>Complete overview of the MEDILINK system</p>
           </div>
-
-          <button
-            className="secondary-button"
-            onClick={() => {
-              loadMedicines();
-              loadAllOrders();
-              loadUsers();
-            }}
-          type="button">
-            🔄 Refresh Statistics
+          <button className="admin-refresh-button" type="button" onClick={() => { loadMedicines(); loadAllOrders(); loadUsers(); }}>
+            ↻ Refresh dashboard
           </button>
+        </header>
+
+        <div className="admin-dashboard-main-grid">
+          <div className="admin-dashboard-primary">
+            <div className="admin-kpi-grid">
+
+<article
+  className="admin-kpi-card kpi-blue"
+  role="button"
+  tabIndex={0}
+  onClick={() => setActiveDashboardSection("users")}
+  onKeyDown={(event) => {
+    if (event.key === "Enter") {
+      setActiveDashboardSection("users");
+    }
+  }}
+  style={{ cursor: "pointer" }}
+>
+
+
+              <div className="admin-kpi-icon">👤</div><div><strong>{totalPatients}</strong><span>Total Patients</span><small>{totalUsers} total registered users</small></div></article>
+
+<article
+  className="admin-kpi-card kpi-purple"
+  role="button"
+  tabIndex={0}
+  onClick={() => setActiveDashboardSection("deliveryPartners")}
+  onKeyDown={(event) => {
+    if (event.key === "Enter") {
+      setActiveDashboardSection("deliveryPartners");
+    }
+  }}
+  style={{ cursor: "pointer" }}><div className="admin-kpi-icon">🚚</div><div><strong>{deliveryPartners}</strong><span>Delivery Partners</span><small>{activePartners} registered partner(s)</small></div></article>
+
+<article
+  className="admin-kpi-card kpi-rose"
+  role="button"
+  tabIndex={0}
+  onClick={() => setActiveDashboardSection("medicines")}
+  onKeyDown={(event) => {
+    if (event.key === "Enter") {
+      setActiveDashboardSection("medicines");
+    }
+  }}
+  style={{ cursor: "pointer" }}><div className="admin-kpi-icon">💊</div><div><strong>{totalMedicines}</strong><span>Total Medicines</span><small>In stock: {totalStock.toLocaleString("en-IN")} units · Low: {lowStockMedicines.length}</small></div></article>
+
+<article
+  className="admin-kpi-card kpi-green"
+  role="button"
+  tabIndex={0}
+
+onClick={() => {
+  setInitialOrderFilter("OUT_FOR_DELIVERY");
+  setActiveDashboardSection("orders");
+}}
+
+  onKeyDown={(event) => {
+    if (event.key === "Enter") {
+      setActiveDashboardSection("orders");
+    }
+  }}
+  style={{ cursor: "pointer" }}
+>
+<div className="admin-kpi-icon">📦</div><div><strong>{totalOrders}</strong><span>Total Orders</span><small>Delivered: {deliveredOrders} · Processing: {processingOrders}</small></div></article>
+            </div>
+
+            <section className="admin-panel admin-orders-overview">
+              <div className="admin-panel-heading"><div className="admin-panel-icon orange">📦</div><div><h2>Orders Overview</h2><p>Order status and delivery tracking</p></div><span className="admin-period-pill">All time⌄</span></div>
+              <div className="admin-order-status-grid">
+
+<div
+  className="admin-status-tile blue"
+  role="button"
+  tabIndex={0}
+
+
+onClick={() => {
+  setInitialOrderFilter("OUT_FOR_DELIVERY");
+  setActiveDashboardSection("orders");
+}}
+
+
+  onKeyDown={(event) => {
+    if (event.key === "Enter") {
+      setInitialOrderFilter("OUT_FOR_DELIVERY");
+      setActiveDashboardSection("orders");
+    }
+  }}
+  style={{ cursor: "pointer" }}
+>
+  <span>🧾</span>
+  <div>
+    <strong>{pendingOrders}</strong>
+    <small>New / Pending</small>
+  </div>
+</div>
+
+
+<div
+  className="admin-status-tile amber"
+  role="button"
+  tabIndex={0}
+
+
+onClick={() => {
+  setInitialOrderFilter("PROCESSING");
+  setActiveDashboardSection("orders");
+}}
+
+
+  onKeyDown={(event) => {
+    if (event.key === "Enter") {
+      setActiveDashboardSection("orders");
+    }
+  }}
+  style={{ cursor: "pointer" }}
+>
+  <span>⚙️</span>
+  <div>
+    <strong>{processingOrders}</strong>
+    <small>Processing</small>
+  </div>
+</div>
+
+
+<div
+  className="admin-status-tile purple"
+  role="button"
+  tabIndex={0}
+  onClick={() => {
+    setInitialOrderFilter("OUT_FOR_DELIVERY");
+    setActiveDashboardSection("orders");
+  }}
+  onKeyDown={(event) => {
+    if (event.key === "Enter") {
+      setInitialOrderFilter("OUT_FOR_DELIVERY");
+      setActiveDashboardSection("orders");
+    }
+  }}
+  style={{ cursor: "pointer" }}
+>
+<div
+  className="admin-status-tile purple"
+  role="button"
+  tabIndex={0}
+
+  onKeyDown={(event) => {
+    if (event.key === "Enter") {
+      setInitialOrderFilter("OUT_FOR_DELIVERY");
+      setActiveDashboardSection("orders");
+    }
+  }}
+  style={{ cursor: "pointer" }}
+>
+  <span>🚚</span>
+  <div>
+    <strong>{deliveryOrders}</strong>
+    <small>Out for Delivery</small>
+  </div>
+</div>
+
+
+onClick={() => {
+  setInitialOrderFilter("OUT_FOR_DELIVERY");
+  setActiveDashboardSection("orders");
+}}
+
+</div>
+
+
+<div
+  className="admin-status-tile green"
+  role="button"
+  tabIndex={0}
+  onClick={() => {
+    setInitialOrderFilter("DELIVERED");
+    setActiveDashboardSection("orders");
+  }}
+  onKeyDown={(event) => {
+    if (event.key === "Enter") {
+      setInitialOrderFilter("DELIVERED");
+      setActiveDashboardSection("orders");
+    }
+  }}
+  style={{ cursor: "pointer" }}
+>
+<span>✓</span><div><strong>{deliveredOrders}</strong>
+
+<div
+  className="admin-status-tile green"
+  role="button"
+  tabIndex={0}
+  onClick={() => {
+    setInitialOrderFilter("DELIVERED");
+    setActiveDashboardSection("orders");
+  }}
+  onKeyDown={(event) => {
+    if (event.key === "Enter") {
+      setInitialOrderFilter("DELIVERED");
+      setActiveDashboardSection("orders");
+    }
+  }}
+  style={{ cursor: "pointer" }}
+>
+  <span>✓</span>
+  <div>
+    <strong>{deliveredOrders}</strong>
+    <small>Completed</small>
+  </div>
+</div>
+
+</div></div>
+              </div>
+            </section>
+
+            <section className="admin-panel admin-recent-panel">
+              <div className="admin-panel-heading"><div className="admin-panel-icon blue">▤</div><div><h2>Recent Orders</h2><p>Latest orders received by MEDILINK</p></div><button className="admin-text-button" type="button" onClick={() => setActiveDashboardSection("orders")}>View all →</button></div>
+              {recentOrders.length === 0 ? <div className="admin-empty-state">No orders have been placed yet.</div> : (
+                <div className="admin-table-scroll"><table className="admin-dashboard-table"><thead><tr><th>Order ID</th><th>Patient</th><th>Items</th><th>Amount</th><th>Status</th><th>Delivery Partner</th><th>Date</th><th>Action</th></tr></thead><tbody>
+                  {recentOrders.map((order, index) => <tr key={order.id ?? index}><td>#{order.id ?? "—"}</td><td>{getPatientName(order)}</td><td>{orderItems(order)}</td><td>₹{orderTotal(order).toLocaleString("en-IN")}</td><td><span className={`admin-status-chip ${statusLabel(order).toLowerCase().replaceAll(" ", "-")}`}>{statusLabel(order)}</span></td><td>{getPartnerName(order)}</td><td>{getDate(order)}</td><td>
+
+                <button
+  className="admin-view-button"
+  type="button"
+  onClick={() => setActiveDashboardSection("orders")}
+>
+  View
+</button>
+
+                    </td></tr>)}
+                </tbody></table></div>
+              )}
+            </section>
+          </div>
+
+          <aside className="admin-dashboard-rail">
+            <section className="admin-panel admin-notifications-panel"><div className="admin-panel-heading"><div className="admin-panel-icon navy">♟</div><div><h2>Notifications</h2><p>Important system updates</p></div><span className="admin-notification-count">{notifications.length}</span></div>
+              {notifications.length === 0 ? <p className="admin-rail-empty">You're all caught up.</p> : notifications.map((item, index) => <div className="admin-notification-row" key={`${item.title}-${index}`}><span className={`admin-notification-icon ${item.tone}`}>{item.icon}</span><div><strong>{item.title}</strong><p>{item.detail}</p><small>{item.time}</small></div><i /></div>)}
+              <button className="admin-rail-link" type="button" onClick={() => setActiveDashboardSection("orders")}>Review orders →</button>
+            </section>
+            <section className="admin-panel admin-activity-panel"><div className="admin-panel-heading"><div className="admin-panel-icon green">◷</div><div><h2>Today's Activity</h2><p>Latest order updates</p></div></div>
+              {activity.length === 0 ? <p className="admin-rail-empty">Activity will appear when orders arrive.</p> : activity.map((order, index) => <div className="admin-activity-row" key={order.id ?? index}><span className={`admin-activity-dot dot-${statusLabel(order).toLowerCase().replaceAll(" ", "-")}`} /><span className="admin-activity-symbol">{isDelivered(order) ? "✓" : isOutForDelivery(order) ? "🚚" : "🛒"}</span><div><strong>Order #{order.id ?? "—"} {statusLabel(order).toLowerCase()}</strong><p>{getPatientName(order)} · ₹{orderTotal(order).toLocaleString("en-IN")}</p></div></div>)}
+            </section>
+          </aside>
         </div>
 
-        <div className="stats-grid">
-          <div className="stat-card stat-users">
-            <div className="stat-icon">👥</div>
-            <div>
-              <p>Total Users</p>
-              <h3>{totalUsers}</h3>
-            </div>
-          </div>
-
-          <div className="stat-card stat-medicines">
-            <div className="stat-icon">💊</div>
-            <div>
-              <p>Total Medicines</p>
-              <h3>{totalMedicines}</h3>
-            </div>
-          </div>
-
-          <div className="stat-card stat-orders">
-            <div className="stat-icon">🛒</div>
-            <div>
-              <p>Total Orders</p>
-              <h3>{totalOrders}</h3>
-            </div>
-          </div>
-
-          <div className="stat-card stat-stock">
-            <div className="stat-icon">📦</div>
-            <div>
-              <p>Total Stock</p>
-              <h3>{totalStock}</h3>
-            </div>
-          </div>
-
-          <div className="stat-card stat-value">
-            <div className="stat-icon">💰</div>
-            <div>
-              <p>Order Value</p>
-              <h3>
-                ₹{totalOrderValue.toLocaleString("en-IN")}
-              </h3>
-            </div>
-          </div>
-
-          <div className="stat-card stat-low-stock">
-            <div className="stat-icon">⚠️</div>
-            <div>
-              <p>Low Stock Items</p>
-              <h3>{lowStockMedicines}</h3>
-            </div>
-          </div>
+        <div className="admin-dashboard-bottom-grid">
+          <section className="admin-panel admin-distribution-panel"><div className="admin-panel-heading"><div className="admin-panel-icon navy">◉</div><div><h2>Order Status Distribution</h2><p>Breakdown of all current orders</p></div></div>
+            <div className="admin-distribution-content"><div className="admin-donut" style={{ background: `conic-gradient(#16b978 0 ${(deliveredOrders / statusTotal) * 100}%, #2879f6 ${(deliveredOrders / statusTotal) * 100}% ${((deliveredOrders + pendingOrders) / statusTotal) * 100}%, #f5a623 ${((deliveredOrders + pendingOrders) / statusTotal) * 100}% ${((deliveredOrders + pendingOrders + processingOrders) / statusTotal) * 100}%, #8957ef ${((deliveredOrders + pendingOrders + processingOrders) / statusTotal) * 100}% 100%)` }}><div><strong>{totalOrders}</strong><span>Total Orders</span></div></div>
+              <div className="admin-legend"><div><i className="legend-green"/>Delivered <strong>{deliveredOrders}</strong></div><div><i className="legend-blue"/>New / Pending <strong>{pendingOrders}</strong></div><div><i className="legend-amber"/>Processing <strong>{processingOrders}</strong></div><div><i className="legend-purple"/>Out for Delivery <strong>{deliveryOrders}</strong></div></div></div>
+          </section>
+          <section className="admin-panel admin-weekly-panel"><div className="admin-panel-heading"><div className="admin-panel-icon blue">▥</div><div><h2>Order Activity</h2><p>Orders received over the last 7 days</p></div><span className="admin-period-pill">7 days</span></div>
+            <div className="admin-weekly-chart">{weeklyOrders.map((day) => <div className="admin-chart-column" key={day.label}><strong>{day.count}</strong><div className="admin-chart-track"><span style={{ height: `${Math.max(day.count > 0 ? 8 : 3, (day.count / maxDailyOrders) * 100)}%` }} /></div><small>{day.label}</small></div>)}</div>
+          </section>
+          <section className="admin-panel admin-low-stock-panel"><div className="admin-panel-heading"><div className="admin-panel-icon red">⚠</div><div><h2>Low Stock Medicines</h2><p>Medicines requiring attention</p></div><button className="admin-text-button" type="button" onClick={() => setActiveDashboardSection("medicines")}>View all →</button></div>
+            {lowStockMedicines.length === 0 ? <p className="admin-rail-empty">All medicines have sufficient stock.</p> : <div className="admin-low-stock-list">{lowStockMedicines.slice(0, 5).map((medicine, index) => <div className="admin-low-stock-row" key={medicine.id ?? index}><img src={getMedicineImage(medicine.name || medicine.medicineName || "")} alt="" onError={(event) => { event.currentTarget.style.display = "none"; }} /><div><strong>{medicine.name || medicine.medicineName || "Medicine"}</strong><small>{medicine.category || medicine.medicineCategory || "Medicine"}</small></div><b>{Number(medicine.stock) || 0}</b><button type="button" onClick={() => setActiveDashboardSection("medicines")}>Update</button></div>)}</div>}
+          </section>
         </div>
+        <div className="admin-dashboard-footer"><span>MEDILINK · Digital Healthcare Management</span><span>Dashboard values are based on currently loaded system data.</span></div>
       </section>
     );
   };
 
-  // =========================================================
   // RESET PASSWORD PAGE
   // =========================================================
 
@@ -3873,51 +4624,390 @@ const PharmacyStats = () => {
               <strong>Role:</strong>{" "}
               {user.role}
             </p>
-          </div>
+            </div>
 
-          {/* DELIVERY PARTNER */}
-          {user.role === "DELIVERY_PARTNER" && (
-            <DeliveryPartnerDashboard
-              user={user}
-              partnerId={1}
-            />
-          )}
+    {/* Role Based Dashboard Navigation */}
+    {user.role !== "DELIVERY_PARTNER" && dashboardSections[user.role] && (
+      <div className="dashboard-navigation">
+        {dashboardSections[user.role].map((section) => (
+          <button
+            key={section.id}
+            type="button"
+            className={
+              activeDashboardSection === section.id
+                ? "dashboard-nav-button active"
+                : "dashboard-nav-button"
+            }
+
+            onClick={() => {
+  console.log("Clicked dashboard section:", section.id);
+  setActiveDashboardSection(section.id);
+
+  if (section.id === "deliveryPartners") {
+    loadDeliveryPartners();
+    loadAllOrders();
+  }
+}}
+          >
+            <span className="dashboard-nav-icon">{section.icon}</span>
+            <span>{section.label}</span>
+          </button>
+        ))}
+      </div>
+    )}
+
+    {/* DELIVERY PARTNER */}
+    {user.role === "DELIVERY_PARTNER" && (
+      <DeliveryPartnerDashboard
+        user={user}
+        partnerId={user.deliveryPartnerId ?? 1}
+      />
+    )}
 
           {/* PATIENT */}
-          {user.role === "PATIENT" && (
-            <>
-             <PatientProfile />
-             <AiHealthAssistant />
+{user.role === "PATIENT" && (
+  <>
+    {activeDashboardSection === "overview" && (
+      <div className="section">
+        <h2>🏠 Patient Overview</h2>
 
-             <PatientCareProducts
-  onAddToCart={addToCart}
-  searchTerm={search}
-/>
+        <p className="stats-subtitle">
+          Welcome to your MEDILINK healthcare dashboard.
+        </p>
 
-              <MedicineSection
-                management={false}
-              />
+        <div className="admin-stats-grid">
 
-              <CartSection
-                cart={cart}
-                cartItemCount={cartItemCount}
-                clearCart={clearCart}
-                increaseCartQuantity={increaseCartQuantity}
-                decreaseCartQuantity={decreaseCartQuantity}
-                removeFromCart={removeFromCart}
-                cartTotal={cartTotal}
-                deliveryCharge={deliveryCharge}
-                cartGrandTotal={cartGrandTotal}
-                placeCartOrders={placeCartOrders}
-              />
+ <div
+  className="stat-card"
+  onClick={() => setActiveDashboardSection("orders")}
+  role="button"
+  tabIndex={0}
+  style={{ cursor: "pointer" }}
+>
+  <div className="stat-icon">📦</div>
+  <div>
+    <h3>{orders.length}</h3>
+    <p>Total Orders</p>
+  </div>
+</div>
 
-              <PrescriptionSection management={false} />
 
-              <OrdersSection
-                adminView={false}
-              />
-            </>
-          )}
+
+<div
+  className="stat-card"
+  onClick={() => setActiveDashboardSection("cart")}
+  role="button"
+  tabIndex={0}
+>
+  <div className="stat-icon">🛒</div>
+  <div>
+    <h3>{cartItemCount}</h3>
+    <p>Cart Items</p>
+  </div>
+</div>
+
+
+<div
+  className="stat-card"
+  onClick={() => setActiveDashboardSection("prescriptions")}
+  role="button"
+  tabIndex={0}
+>
+  <div className="stat-icon">📋</div>
+  <div>
+    <h3>{prescriptions.length}</h3>
+    <p>Prescriptions</p>
+  </div>
+</div>
+
+
+
+<div
+  className="stat-card"
+  onClick={() => setActiveDashboardSection("products")}
+  role="button"
+  tabIndex={0}
+>
+  <div className="stat-icon">💊</div>
+  <div>
+    <h3>{medicines.length}</h3>
+    <p>Medicines Available</p>
+  </div>
+</div>
+
+
+        </div>
+          {/* QUICK CART + RECENT ORDERS */}
+<div
+  style={{
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))",
+    gap: "20px",
+    marginTop: "24px",
+  }}
+>
+  {/* CART SUMMARY */}
+  <div
+    style={{
+      padding: "22px",
+      borderRadius: "16px",
+      background: "#ffffff",
+      border: "1px solid #dbeafe",
+      boxShadow: "0 4px 14px rgba(15, 23, 42, 0.06)",
+    }}
+  >
+    <h3 style={{ margin: "0 0 6px" }}>
+      🛒 My Cart
+    </h3>
+
+    <p style={{ color: "#64748b", marginTop: 0 }}>
+      {cartItemCount} item
+      {cartItemCount === 1 ? "" : "s"} in your cart
+    </p>
+
+    <h2 style={{ margin: "12px 0" }}>
+      ₹{cartGrandTotal.toLocaleString("en-IN")}
+    </h2>
+
+    {cart.length === 0 ? (
+      <p
+        style={{
+          padding: "12px",
+          background: "#f8fafc",
+          borderRadius: "10px",
+          color: "#64748b",
+        }}
+      >
+        Your cart is empty.
+      </p>
+    ) : (
+      <p style={{ color: "#64748b" }}>
+        Subtotal: ₹{cartTotal.toLocaleString("en-IN")}
+        <br />
+        Delivery:{" "}
+        {deliveryCharge === 0
+          ? "FREE"
+          : "₹" + deliveryCharge.toLocaleString("en-IN")}
+      </p>
+    )}
+
+    <button
+      className="success-button"
+      type="button"
+      style={{ width: "100%" }}
+      onClick={() =>
+        setActiveDashboardSection("cart")
+      }
+    >
+      🛒 Review Cart
+    </button>
+  </div>
+
+  {/* RECENT ORDERS */}
+  <div
+    style={{
+      padding: "22px",
+      borderRadius: "16px",
+      background: "#ffffff",
+      border: "1px solid #dbeafe",
+      boxShadow: "0 4px 14px rgba(15, 23, 42, 0.06)",
+    }}
+  >
+    <h3 style={{ margin: "0 0 6px" }}>
+      📦 Recent Orders
+    </h3>
+
+    <p style={{ color: "#64748b", marginTop: 0 }}>
+      Your latest orders
+    </p>
+
+    {orders.length === 0 ? (
+      <p
+        style={{
+          padding: "12px",
+          background: "#f8fafc",
+          borderRadius: "10px",
+          color: "#64748b",
+        }}
+      >
+        You have no orders yet.
+      </p>
+    ) : (
+      <div>
+        {orders.slice(0, 3).map((order) => (
+          <div
+            key={order.id}
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              padding: "10px 0",
+              borderBottom: "1px solid #e2e8f0",
+            }}
+          >
+            <div>
+              <strong>
+                Order #{order.id}
+              </strong>
+
+              <div
+                style={{
+                  fontSize: "13px",
+                  color: "#64748b",
+                  marginTop: "4px",
+                }}
+              >
+                Order details
+              </div>
+            </div>
+
+            <div style={{ textAlign: "right" }}>
+              <strong>
+                ₹
+                {Number(
+                  order.totalPrice || 0
+                ).toLocaleString("en-IN")}
+              </strong>
+
+              <div
+                style={{
+                  fontSize: "12px",
+                  marginTop: "3px",
+                  color:
+                    order.status === "DELIVERED"
+                      ? "#16a34a"
+                      : "#64748b",
+                }}
+              >
+                {order.status || "PLACED"}
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+    )}
+
+    <button
+      className="secondary-button"
+      type="button"
+      style={{
+        width: "100%",
+        marginTop: "14px",
+      }}
+      onClick={() =>
+        setActiveDashboardSection("orders")
+      }
+    >
+      📦 View All Orders
+    </button>
+  </div>
+</div>
+
+<div
+  className="patient-quick-actions"
+  style={{
+    display: "grid",
+    gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+    gap: "12px",
+  }}
+>
+
+
+          <button
+            className="success-button"
+            type="button"
+            onClick={() =>
+              setActiveDashboardSection("products")
+            }
+          >
+            💊 Browse Medicines
+          </button>
+
+          <button
+            className="secondary-button"
+            type="button"
+            onClick={() =>
+              setActiveDashboardSection("orders")
+            }
+          >
+            📦 View My Orders
+          </button>
+
+          <button
+            className="secondary-button"
+            type="button"
+            onClick={() =>
+              setActiveDashboardSection("prescriptions")
+            }
+          >
+            📋 My Prescriptions
+          </button>
+
+          <button
+            className="secondary-button"
+            type="button"
+            onClick={() =>
+              setActiveDashboardSection("ai")
+            }
+          >
+            🤖 AI Health Assistant
+          </button>
+
+        </div>
+      </div>
+    )}
+
+
+{activeDashboardSection === "orders" && (
+  <OrdersSection adminView={false} />
+)}
+
+{activeDashboardSection === "cart" && (
+  <CartSection
+    cart={cart}
+    cartItemCount={cartItemCount}
+    clearCart={clearCart}
+    increaseCartQuantity={increaseCartQuantity}
+    decreaseCartQuantity={decreaseCartQuantity}
+    removeFromCart={removeFromCart}
+    cartTotal={cartTotal}
+    deliveryCharge={deliveryCharge}
+    cartGrandTotal={cartGrandTotal}
+    placeCartOrders={placeCartOrders}
+  />
+)}
+
+
+    {activeDashboardSection === "products" && (
+      <>
+        <PatientCareProducts
+          onAddToCart={addToCart}
+          searchTerm={search}
+        />
+
+        <MedicineSection
+          management={false}
+        />
+
+
+      </>
+    )}
+
+    {activeDashboardSection === "prescriptions" && (
+      <PrescriptionSection
+        management={false}
+      />
+    )}
+
+    {activeDashboardSection === "profile" && (
+      <PatientProfile />
+    )}
+
+    {activeDashboardSection === "ai" && (
+      <AiHealthAssistant />
+    )}
+  </>
+)}
 
           {/* PHARMACY */}
           {user.role === "PHARMACY" && (
@@ -3928,29 +5018,366 @@ const PharmacyStats = () => {
 
     <MedicineSection management={true} />
 
-    <OrdersSection adminView={true} />
+
+<OrdersSection
+  adminView={true}
+  initialFilter={initialOrderFilter}
+/>
+
   </>
 )}
-  
 
-          {/* ADMIN */}
-          {user.role === "ADMIN" && (
-            <>
-              <AdminStats />
+{/* ADMIN */}
+{user.role === "ADMIN" && (
+  <>
+    {activeDashboardSection === "overview" && (
+  <AdminStats
+    setActiveDashboardSection={setActiveDashboardSection}
+  />
+)}
 
-              <MedicineSection
-                management={true}
-              />
+    {activeDashboardSection === "medicines" && (
+      <MedicineSection management={true} />
+    )}
 
-              <UsersSection />
+    {activeDashboardSection === "users" && (
+      <UsersSection />
+    )}
 
-              <PrescriptionSection management={true} />
+    {activeDashboardSection === "prescriptions" && (
+      <PrescriptionSection management={true} />
+    )}
 
-              <OrdersSection
-                adminView={true}
-              />
-            </>
+    {activeDashboardSection === "orders" && (
+
+<OrdersSection
+  key={initialOrderFilter}
+  adminView={true}
+  initialFilter={initialOrderFilter}
+/>
+
+    )}
+
+    {activeDashboardSection === "deliveryPartners" && (
+      <section className="dashboard-section">
+        <div className="section-title-row">
+          <h2>🚚 Delivery Partners</h2>
+          <p>Delivery partner accounts</p>
+        </div>
+
+<div className="admin-stats-grid">
+  <div
+    className="stat-card"
+    style={{
+      padding: "24px",
+      borderRadius: "18px",
+      background: "linear-gradient(135deg, #ffffff, #eff6ff)",
+      border: "1px solid #bfdbfe",
+      boxShadow: "0 8px 24px rgba(30, 64, 175, 0.08)",
+      display: "flex",
+      alignItems: "center",
+      gap: "18px",
+    }}
+  >
+    <div
+      className="stat-icon"
+      style={{
+        width: "56px",
+        height: "56px",
+        borderRadius: "16px",
+        background: "#dbeafe",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        fontSize: "28px",
+        flexShrink: 0,
+      }}
+    >
+      🚚
+    </div>
+    <div>
+      <h3 style={{ margin: "0 0 6px", fontSize: "30px", fontWeight: 800, color: "#1e3a8a" }}>
+        {users.filter(
+          (item) =>
+            String(item.role || "").toUpperCase() ===
+            "DELIVERY_PARTNER"
+        ).length}
+      </h3>
+      <p style={{ margin: 0, color: "#475569", fontWeight: 600 }}>
+        Total Delivery Partners
+      </p>
+    </div>
+  </div>
+
+  <div
+    className="stat-card"
+    onClick={() => setActiveDashboardSection("deliveryPartners")}
+    style={{
+       cursor: "pointer",
+      padding: "24px",
+      borderRadius: "18px",
+      background: "linear-gradient(135deg, #ffffff, #f0fdf4)",
+      border: "1px solid #bbf7d0",
+      boxShadow: "0 8px 24px rgba(22, 101, 52, 0.08)",
+      display: "flex",
+      alignItems: "center",
+      gap: "18px",
+    }}
+  >
+    <div
+      className="stat-icon"
+      style={{
+        width: "56px",
+        height: "56px",
+        borderRadius: "16px",
+        background: "#dcfce7",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        fontSize: "28px",
+        flexShrink: 0,
+      }}
+    >
+      📦
+    </div>
+    <div>
+      <h3 style={{ margin: "0 0 6px", fontSize: "30px", fontWeight: 800, color: "#166534" }}>
+        {orders.length}
+      </h3>
+      <p style={{ margin: 0, color: "#475569", fontWeight: 600 }}>
+        Total Orders
+      </p>
+    </div>
+  </div>
+</div>
+<div
+  className="section"
+  style={{
+    marginTop: "24px",
+    padding: "24px",
+    borderRadius: "18px",
+    background: "#ffffff",
+    border: "1px solid #e2e8f0",
+    boxShadow: "0 8px 24px rgba(15, 40, 75, 0.06)",
+  }}
+>
+
+
+
+
+<h3
+  style={{
+    margin: "0 0 20px",
+    fontSize: "20px",
+    fontWeight: 750,
+    color: "#0f172a",
+    letterSpacing: "-0.4px",
+  }}
+>
+  Registered Delivery Partners
+</h3>
+
+
+
+
+
+          {loadingDeliveryPartners ? (
+            <p>Loading delivery partners...</p>
+          ) : deliveryPartners.length === 0 ? (
+            <p>No delivery partners found yet.</p>
+          ) : (
+            <div style={{ overflowX: "auto" }}>
+              <table
+                style={{
+                  width: "100%",
+                  borderCollapse: "collapse",
+                  background: "#ffffff",
+                }}
+              >
+                <thead>
+                  <tr>
+                    {[
+                      "Partner ID",
+                      "Name",
+                      "Email",
+                      "Phone",
+                      "Vehicle Number",
+                      "Vehicle Type",
+                      "Availability",
+                      "Assigned Orders",
+                      "Active Deliveries",
+                      "Completed",
+                      "Current Status",
+                      "Tracking ID",
+                      "Actions",
+                    ].map((heading) => (
+                      <th
+                        key={heading}
+                        style={{
+                          padding: "12px",
+                          textAlign: "left",
+                          background: "#eff6ff",
+                          color: "#1e3a8a",
+                          borderBottom: "1px solid #dbeafe",
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        {heading}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+
+                <tbody>
+                  {deliveryPartners.map((partner) => {
+                    const partnerOrders = orders.filter((order) => {
+                      const assignedId =
+                        order.deliveryPartnerId ??
+                        order.assignedPartner?.id ??
+                        order.deliveryPartner?.id;
+
+                      return (
+                        assignedId != null &&
+                        String(assignedId) === String(partner.id)
+                      );
+                    });
+
+                    const getStatus = (order) =>
+                      String(
+                        order.deliveryStatus || order.status || "PLACED"
+                      ).toUpperCase();
+
+                    const completed = partnerOrders.filter(
+                      (order) => getStatus(order) === "DELIVERED"
+                    ).length;
+
+                    const active = partnerOrders.filter((order) =>
+                      [
+                        "PROCESSING",
+                        "PACKED",
+                        "DISPATCHED",
+                        "OUT_FOR_DELIVERY",
+                        "IN_TRANSIT",
+                      ].includes(getStatus(order))
+                    ).length;
+
+                    const currentOrder = partnerOrders.find(
+                      (order) => getStatus(order) !== "DELIVERED"
+                    );
+
+                    return (
+                      <tr key={partner.id}>
+                        <td style={{ padding: "12px" }}>
+                          {partner.id ?? "—"}
+                        </td>
+                        <td style={{ padding: "12px" }}>
+                          {partner.name || "—"}
+                        </td>
+                        <td style={{ padding: "12px" }}>
+                          {partner.email || "—"}
+                        </td>
+                        <td style={{ padding: "12px" }}>
+                          {partner.phone || "—"}
+                        </td>
+                        <td style={{ padding: "12px" }}>
+                          {partner.vehicleNumber || "—"}
+                        </td>
+                        <td style={{ padding: "12px" }}>
+                          {partner.vehicleType || "—"}
+                        </td>
+                        <td
+                          style={{
+                            padding: "12px",
+                            color: partner.available ? "#15803d" : "#b91c1c",
+                            fontWeight: 700,
+                          }}
+                        >
+                          {partner.available ? "Available" : "Unavailable"}
+                        </td>
+                        <td style={{ padding: "12px" }}>
+                          {partnerOrders.length}
+                        </td>
+                        <td style={{ padding: "12px" }}>{active}</td>
+                        <td style={{ padding: "12px" }}>{completed}</td>
+                        <td style={{ padding: "12px" }}>
+                          {currentOrder ? getStatus(currentOrder) : "No active order"}
+                        </td>
+                        <td style={{ padding: "12px" }}>
+                          {currentOrder?.trackingId ??
+                            currentOrder?.trackingNumber ??
+                            "—"}
+                        </td>
+                        <td style={{ padding: "12px", whiteSpace: "nowrap" }}>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              alert(
+                                `Partner ID: ${partner.id ?? "—"}\n` +
+                                  `Name: ${partner.name || "—"}\n` +
+                                  `Email: ${partner.email || "—"}\n` +
+                                  `Phone: ${partner.phone || "—"}\n` +
+                                  `Vehicle Number: ${partner.vehicleNumber || "—"}\n` +
+                                  `Vehicle Type: ${partner.vehicleType || "—"}`
+                              )
+                            }
+                          >
+                            View Details
+                          </button>
+
+                          <button
+                            type="button"
+                            style={{ marginLeft: "6px" }}
+                            onClick={async () => {
+                              const nextAvailable = !partner.available;
+
+                              try {
+                                const response = await fetch(
+                                  `${API}/api/delivery-partners/${partner.id}/availability?available=${nextAvailable}`,
+                                  {
+                                    method: "PUT",
+                                    headers: {
+                                      Authorization: "Bearer " + token,
+                                    },
+                                  }
+                                );
+
+                                if (response.ok) {
+                                  await loadDeliveryPartners();
+                                } else {
+                                  alert("Could not update availability.");
+                                }
+                              } catch (error) {
+                                console.error(error);
+                                alert("Cannot connect to the backend.");
+                              }
+                            }}
+                          >
+                            Toggle Availability
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
           )}
+
+
+
+
+
+        </div>
+      </section>
+    )}
+
+
+
+
+  </>
+)}
+
+
         </div>
 
         <OrderTrackingModal />
