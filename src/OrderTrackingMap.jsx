@@ -11,8 +11,9 @@ const DEFAULT_PATIENT_LOCATION = [17.3850, 78.4867];
 // Demo MEDILINK pharmacy location.
 // This can later come from the pharmacy database.
 const PHARMACY_LOCATION = [17.4065, 78.4772];
-
-const API = "http://localhost:8080";
+const API = (
+  import.meta.env.VITE_API_BASE_URL || "http://localhost:8080"
+).replace(/\/+$/, "");
 
 // =========================================================
 // DISTANCE HELPERS

@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 
-const API = "http://localhost:8080";
+const API = (
+  import.meta.env.VITE_API_BASE_URL || "http://localhost:8080"
+).replace(/\/+$/, "");
 
 function DeliveryPartnerDashboard({ user, partnerId = 1 }) {
   console.log("DELIVERY PARTNER ID:", partnerId);
