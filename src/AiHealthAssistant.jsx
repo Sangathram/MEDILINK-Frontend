@@ -2060,7 +2060,7 @@ function AiHealthAssistant() {
 
       const response =
         await fetch(
-          "http://localhost:8080/api/ai/chat",
+          `${(import.meta.env.VITE_API_BASE_URL || "http://localhost:8080").replace(/\/+$/, "")}/api/ai/chat`,
           {
             method: "POST",
 

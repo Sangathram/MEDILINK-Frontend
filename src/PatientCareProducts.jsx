@@ -1,6 +1,9 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
+const API_BASE_URL = (
+  import.meta.env.VITE_API_BASE_URL || "http://localhost:8080"
+).replace(/\/+$/, "");
 
-const API_URL = "http://localhost:8080/api/healthcare-products";
+const API_URL = `${API_BASE_URL}/api/healthcare-products`;
 
 const categories = [
   { key: "ALL", label: "🛍️ All Products" },

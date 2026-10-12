@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
-
-const API = "http://localhost:8080";
+const API = (
+  import.meta.env.VITE_API_BASE_URL || "http://localhost:8080"
+).replace(/\/+$/, "");
 
 const NotificationBell = ({ user, onOrderClick }) => {
   const [notifications, setNotifications] = useState([]);
